@@ -223,12 +223,16 @@
     }
     .now-playing .np-icon {
       flex-shrink: 0;
-      width: 48px; height: 48px;
-      border-radius: 50%;
+      width: 72px; height: 72px;
+      border-radius: 8px;
       background: var(--teal);
-      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
     }
-    .now-playing .np-icon svg { width: 24px; height: 24px; fill: var(--white); }
+    .now-playing .np-icon img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+    }
     .now-playing .np-text { flex: 1; min-width: 0; }
     .now-playing .np-label {
       font-family: "Montserrat", sans-serif;
@@ -394,7 +398,7 @@
     <!-- Now Playing -->
     <div class="now-playing" role="region" aria-label="Now playing" aria-live="polite">
       <div class="np-icon">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
+        <img id="npCover" src="https://d3d4yli4hf5bmh.cloudfront.net/cover.jpg" alt="Album art" />
       </div>
       <div class="np-text">
         <div class="np-label">Now Playing</div>
@@ -494,6 +498,11 @@
     let lastTitle = null;
 
     function renderMetadata(d) {
+      // Album art
+      const cover = document.getElementById("npCover");
+      cover.src = "https://d3d4yli4hf5bmh.cloudfront.net/cover.jpg?_=" + Date.now();
+      cover.alt = d.title ? `${d.title} — ${d.artist}` : "Album art";
+
       // Now playing
       document.getElementById("npTitle").textContent  = d.title  || "—";
       document.getElementById("npArtist").textContent = d.artist || "—";

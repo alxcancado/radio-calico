@@ -10,7 +10,7 @@ Radio Calico is a single-page web radio player that streams a live lossless HLS 
 
 | Layer    | Technology                          |
 |----------|-------------------------------------|
-| Frontend | Vanilla HTML/CSS/JS (single file)   |
+| Frontend | HTML + CSS + JS (3 separate files)  |
 | Audio    | hls.js (HLS stream playback)        |
 | Fonts    | Google Fonts — Montserrat, Open Sans|
 | Backend  | Python / Flask                      |
@@ -46,9 +46,17 @@ Source: `RadioCalico_Style_Guide.txt`
 
 ---
 
-## 4. Frontend — `index.html`
+## 4. Frontend — `index.html`, `style.css`, `app.js`
 
-Single self-contained file. No build step, no framework.
+Three separate files. No build step, no framework.
+
+### 4.0 File Structure
+
+| File       | Purpose                              |
+|------------|--------------------------------------|
+| `index.html` | HTML structure only                |
+| `style.css`  | All CSS styling and animations     |
+| `app.js`     | All JS — player, metadata, ratings |
 
 ### 4.1 Layout
 
@@ -143,6 +151,18 @@ Album art: `GET https://d3d4yli4hf5bmh.cloudfront.net/cover.jpg?_=<timestamp>` �
 - Voted state: `.btn-rate.voted.up` (mint tint) / `.btn-rate.voted.down` (orange tint).
 - Switching vote (👍 → 👎) is allowed; voting the same way twice is a no-op.
 
+### 4.8 app.js Architecture
+
+`app.js` is split into two layers:
+
+**Pure helpers** (top of file, no DOM deps — testable in isolation):
+- `songKey(artist, title)` — builds the URL-safe song identifier
+- `buildMetaParts(d)` — formats the metadata line string
+- `buildRecentTracks(d)` — extracts the 5 previous tracks into an array
+- `getUID(storage)` — gets or creates the persistent user UUID
+
+**DOM bootstrap** (wrapped in `if (typeof document !== "undefined")`) — player, metadata polling, ratings fetch/render. This guard allows the pure helpers to be loaded and tested without triggering DOM access.
+
 ---
 
 ## 5. Backend — `api/app.py`
@@ -204,15 +224,101 @@ Response: same shape as GET.
 
 ---
 
-## 6. Repository
+## 6. Testing
 
-- Git initialised at project root.
-- GitHub repo: `https://github.com/alxcancado/radio-calico` (public, HTTPS remote).
-- `.gitignore` excludes: `.DS_Store`, `*.zip`, `api/ratings.db`, `api/__pycache__/`, `api/.venv/`, `api/.python-version`.
+### 6.1 Backend — pytest
+
+File: `tests/test_api.py`
+Run: `uv run pytest ../tests/test_api.py -v` from the `api/` directory.
+
+Uses a `tmp_path` fixture to give each test an isolated SQLite DB. 13 tests across two classes:
+
+`TestGetRatings`:
+- Returns zeros for unknown songs
+- `user_vote` is null when user hasn't voted
+- Reflects an existing vote correctly
+- Other users don't see a personal vote that isn't theirs
+
+`TestCastVote`:
+- Cast up / down vote
+- Multiple users accumulate correctly
+- Same vote twice is a no-op
+- Changing vote adjusts both counters
+- Invalid vote value → 400
+- Missing / empty uid → 400
+- Different songs are fully independent
+
+### 6.2 Frontend — browser test page
+
+File: `tests/frontend.test.html`
+Open directly in any browser — no server or build tool needed.
+
+Tests the pure helper functions from `app.js` using a minimal inline harness. Results render as green ✓ / red ✗ lines with a pass/fail summary. 13 tests across four suites:
+
+`songKey()` — encoding, special chars, empty strings
+`buildMetaParts()` — full string, missing fields, kHz formatting
+`buildRecentTracks()` — count, content, sparse data, missing artist fallback
+`getUID()` — generation, persistence, uniqueness across stores
 
 ---
 
-## 7. Assets
+## 7. Repository
+
+- Git initialised at project root.
+- GitHub repo: `https://github.com/alxcancado/radio-calico` (public, HTTPS remote).
+- `.gitignore` excludes: `.DS_Store`, `*.zip`, `api/ratings.db`, `api/__pycache__/`, `api/.venv/`, `api/.python-version`, `tests/__pycache__/`.
+
+---
+
+## 9. GitHub Actions — AI Issue Review
+
+### 9.1 Overview
+
+Two workflows handle automated issue triage using an LLM via OpenRouter:
+
+1. `issue-review.yml` — triggers on `issues: opened`, calls the LLM, posts an analysis comment, adds label `ai-pending-review`
+2. `issue-apply.yml` — triggers when label `ai-approved` is added to an issue, creates a branch, commits suggested changes, opens a PR
+
+### 9.2 Required Setup (one-time)
+
+**GitHub Secret:**
+- Go to repo → Settings → Secrets and variables → Actions → New repository secret
+- Name: `OPENROUTER_API_KEY`
+- Value: your OpenRouter API key (from openrouter.ai/settings/keys)
+- Never commit the key to any file
+
+**Workflow permissions:**
+- Go to repo → Settings → Actions → General → Workflow permissions
+- Select "Read and write permissions"
+- Save
+
+### 9.3 OpenRouter API
+
+- Base URL: `https://openrouter.ai/api/v1/chat/completions`
+- Auth: `Authorization: Bearer $OPENROUTER_API_KEY`
+- Fully OpenAI-compatible — same request/response shape
+- Model selection via `model` field, e.g.:
+  - `meta-llama/llama-3.3-70b-instruct:free` (free tier)
+  - `anthropic/claude-sonnet-4-5` (stronger reasoning)
+  - `google/gemini-2.0-flash` (fast + cheap)
+
+### 9.4 Workflow Files
+
+Located in `.github/workflows/`:
+
+| File | Trigger | Purpose |
+|------|---------|---------|
+| `issue-review.yml` | `issues: opened` | LLM reviews issue, posts comment, labels `ai-pending-review` |
+| `issue-apply.yml`  | `label: ai-approved` added | Creates branch, applies changes, opens PR |
+
+### 9.5 Label Convention
+
+| Label | Set by | Meaning |
+|-------|--------|---------|
+| `ai-pending-review` | Workflow (auto) | LLM has analysed the issue, awaiting human decision |
+| `ai-approved` | Maintainer (manual) | Approved for automated implementation |
+| `ai-rejected` | Maintainer (manual) | Issue closed without action |
+
 
 | File                      | Purpose                        |
 |---------------------------|--------------------------------|

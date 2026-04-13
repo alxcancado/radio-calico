@@ -1,0 +1,81 @@
+name: AI Issue Review
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Call OpenRouter LLM
+        id: llm
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Escape issue content for JSON
+          PROMPT=$(jq -n \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$ISSUE_BODY" \
+            --arg repo "$REPO" \
+            '{
+              model: "meta-llama/llama-3.3-70b-instruct:free",
+              messages: [
+                {
+                  role: "system",
+                  content: "You are a code reviewer for the Radio Calico web radio player project (\($repo)). The project is a vanilla HTML/CSS/JS frontend with a Flask+SQLite ratings API. When given a GitHub issue, you must: 1) Summarise what is being requested. 2) Assess feasibility and impact. 3) Describe exactly what files and changes would be needed. 4) Flag any risks or concerns. Be concise and technical. End your response with either RECOMMENDATION: APPROVE or RECOMMENDATION: REJECT with a one-line reason."
+                },
+                {
+                  role: "user",
+                  content: "Issue title: \($title)\n\nIssue body:\n\($body)"
+                }
+              ],
+              max_tokens: 1024
+            }')
+
+          RESPONSE=$(curl -s https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PROMPT")
+
+          # Extract the message content
+          COMMENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "LLM response unavailable."')
+
+          # Save to file to avoid shell escaping issues
+          echo "$COMMENT" > /tmp/llm_comment.txt
+
+      - name: Post comment on issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          BODY=$(cat /tmp/llm_comment.txt)
+          FULL_COMMENT="## 🤖 AI Review
+
+${BODY}
+
+---
+*To approve this issue for automated implementation, add the label \`ai-approved\`.*
+*To reject it, add the label \`ai-rejected\`.*"
+
+          gh issue comment "$ISSUE_NUMBER" --body "$FULL_COMMENT"
+
+      - name: Add pending label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # Create label if it doesn't exist yet
+          gh label create "ai-pending-review" --color "e4e669" --description "Awaiting maintainer decision on AI review" 2>/dev/null || true
+          gh label create "ai-approved" --color "0e8a16" --description "Approved for AI implementation" 2>/dev/null || true
+          gh label create "ai-rejected" --color "d93f0b" --description "Rejected by maintainer" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "ai-pending-review"

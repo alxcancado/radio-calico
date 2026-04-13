@@ -1,0 +1,120 @@
+name: AI Issue Apply
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  apply:
+    if: github.event.label.name == 'ai-approved'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Gather repo context
+        id: context
+        run: |
+          # Bundle relevant source files into a single context string
+          {
+            echo "=== index.html ==="
+            cat index.html
+            echo ""
+            echo "=== style.css ==="
+            cat style.css
+            echo ""
+            echo "=== app.js ==="
+            cat app.js
+            echo ""
+            echo "=== api/app.py ==="
+            cat api/app.py
+          } > /tmp/repo_context.txt
+
+      - name: Call OpenRouter LLM for implementation
+        id: llm
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          CONTEXT=$(cat /tmp/repo_context.txt)
+
+          PROMPT=$(jq -n \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$ISSUE_BODY" \
+            --arg context "$CONTEXT" \
+            '{
+              model: "meta-llama/llama-3.3-70b-instruct:free",
+              messages: [
+                {
+                  role: "system",
+                  content: "You are an expert developer implementing changes to the Radio Calico web radio player. You will be given the full source code and a GitHub issue. Respond with ONLY a valid JSON object in this exact format (no markdown, no explanation outside the JSON):\n{\n  \"branch\": \"fix/short-branch-name\",\n  \"pr_title\": \"Short PR title\",\n  \"pr_body\": \"Description of what was changed and why.\",\n  \"files\": [\n    { \"path\": \"relative/path/to/file\", \"content\": \"full new file content as a string\" }\n  ]\n}\nOnly include files that need to change. Use minimal, focused changes."
+                },
+                {
+                  role: "user",
+                  content: "Issue title: \($title)\n\nIssue body:\n\($body)\n\nCurrent source code:\n\($context)"
+                }
+              ],
+              max_tokens: 4096
+            }')
+
+          RESPONSE=$(curl -s https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PROMPT")
+
+          echo "$RESPONSE" | jq -r '.choices[0].message.content' > /tmp/llm_patch.txt
+          cat /tmp/llm_patch.txt
+
+      - name: Apply changes and open PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          PATCH=$(cat /tmp/llm_patch.txt)
+
+          # Parse branch name and PR details
+          BRANCH=$(echo "$PATCH" | jq -r '.branch')
+          PR_TITLE=$(echo "$PATCH" | jq -r '.pr_title')
+          PR_BODY=$(echo "$PATCH" | jq -r '.pr_body')
+
+          # Configure git
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create and switch to new branch
+          git checkout -b "$BRANCH"
+
+          # Write each file
+          echo "$PATCH" | jq -c '.files[]' | while IFS= read -r file; do
+            FILE_PATH=$(echo "$file" | jq -r '.path')
+            FILE_CONTENT=$(echo "$file" | jq -r '.content')
+            mkdir -p "$(dirname "$FILE_PATH")"
+            echo "$FILE_CONTENT" > "$FILE_PATH"
+            git add "$FILE_PATH"
+          done
+
+          git commit -m "$PR_TITLE (closes #$ISSUE_NUMBER)"
+          git push origin "$BRANCH"
+
+          # Open PR
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY
+
+Closes #$ISSUE_NUMBER" \
+            --head "$BRANCH" \
+            --base main
+
+          # Update issue label
+          gh issue edit "$ISSUE_NUMBER" \
+            --remove-label "ai-pending-review" \
+            --add-label "ai-approved"
+
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "🤖 Implementation complete. A pull request has been opened for review."

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Radio Calico — Frontend Tests</title>
+  <style>
+    body { font-family: monospace; padding: 24px; background: #f5f5f5; }
+    h1   { font-size: 1.1rem; margin-bottom: 16px; }
+    .suite  { margin-bottom: 20px; }
+    .suite h2 { font-size: 0.9rem; color: #555; margin-bottom: 6px; }
+    .pass { color: #1a7a1a; }
+    .fail { color: #c0392b; font-weight: bold; }
+    #summary { margin-top: 20px; font-size: 1rem; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Radio Calico — Frontend Unit Tests</h1>
+  <div id="results"></div>
+  <div id="summary"></div>
+
+  <!-- Load only the pure helpers — guard ensures DOM code is skipped -->
+  <script>
+    // ── Pure helpers (mirrored from app.js) ──────────────────────────────────
+    function songKey(artist, title) {
+      return encodeURIComponent(`${artist}|${title}`);
+    }
+
+    function buildMetaParts(d) {
+      const parts = [];
+      if (d.album) parts.push(d.album);
+      if (d.date)  parts.push(d.date);
+      if (d.bit_depth && d.sample_rate)
+        parts.push(`${d.bit_depth}-bit / ${(d.sample_rate / 1000).toFixed(1)} kHz`);
+      return parts.join(" · ");
+    }
+
+    function buildRecentTracks(d) {
+      const tracks = [];
+      for (let i = 1; i <= 5; i++) {
+        const artist = d[`prev_artist_${i}`], title = d[`prev_title_${i}`];
+        if (artist || title) tracks.push({ artist: artist || "—", title: title || "—" });
+      }
+      return tracks;
+    }
+
+    function getUID(storage) {
+      let uid = storage.getItem("rc_uid");
+      if (!uid) { uid = crypto.randomUUID(); storage.setItem("rc_uid", uid); }
+      return uid;
+    }
+
+    // ── Harness + tests run after DOM is ready ────────────────────────────────
+    document.addEventListener("DOMContentLoaded", () => {
+      let passed = 0, failed = 0;
+      const results = document.getElementById("results");
+
+      function suite(name, fn) {
+        const section = document.createElement("div");
+        section.className = "suite";
+        section.innerHTML = `<h2>${name}</h2>`;
+        results.appendChild(section);
+        fn(section);
+      }
+
+      function test(label, assertion, section) {
+        const el = document.createElement("div");
+        try {
+          assertion();
+          el.className = "pass";
+          el.textContent = `✓ ${label}`;
+          passed++;
+        } catch (e) {
+          el.className = "fail";
+          el.textContent = `✗ ${label} — ${e.message}`;
+          failed++;
+        }
+        section.appendChild(el);
+      }
+
+      function assert(condition, msg) {
+        if (!condition) throw new Error(msg || "assertion failed");
+      }
+
+      function assertEqual(a, b) {
+        if (a !== b) throw new Error(`expected "${b}", got "${a}"`);
+      }
+
+      // ── Tests ──────────────────────────────────────────────────────────────
+
+      suite("songKey()", s => {
+        test("encodes artist and title with pipe separator", () => {
+          assertEqual(songKey("The Cure", "Just Like Heaven"), encodeURIComponent("The Cure|Just Like Heaven"));
+        }, s);
+        test("handles empty strings", () => {
+          assertEqual(songKey("", ""), encodeURIComponent("|"));
+        }, s);
+        test("handles special characters", () => {
+          assertEqual(songKey("AC/DC", "Back in Black"), encodeURIComponent("AC/DC|Back in Black"));
+        }, s);
+      });
+
+      suite("buildMetaParts()", s => {
+        test("returns album · year · quality string", () => {
+          assertEqual(
+            buildMetaParts({ album: "Purple Rain", date: "1984", bit_depth: 16, sample_rate: 44100 }),
+            "Purple Rain · 1984 · 16-bit / 44.1 kHz"
+          );
+        }, s);
+        test("omits missing fields", () => {
+          assertEqual(buildMetaParts({ album: "Unknown" }), "Unknown");
+        }, s);
+        test("returns empty string when no fields", () => {
+          assertEqual(buildMetaParts({}), "");
+        }, s);
+        test("formats 48000 sample rate correctly", () => {
+          assertEqual(buildMetaParts({ bit_depth: 24, sample_rate: 48000 }), "24-bit / 48.0 kHz");
+        }, s);
+      });
+
+      suite("buildRecentTracks()", s => {
+        const fixture = {
+          prev_artist_1: "Prince",       prev_title_1: "Purple Rain",
+          prev_artist_2: "The Cure",     prev_title_2: "Close to Me",
+          prev_artist_3: "Depeche Mode", prev_title_3: "Enjoy the Silence",
+          prev_artist_4: "Sia",          prev_title_4: "Chandelier",
+          prev_artist_5: "Oingo Boingo", prev_title_5: "Dead Man's Party",
+        };
+        test("returns 5 tracks", () => {
+          assertEqual(buildRecentTracks(fixture).length, 5);
+        }, s);
+        test("first track has correct artist and title", () => {
+          const t = buildRecentTracks(fixture)[0];
+          assertEqual(t.artist, "Prince");
+          assertEqual(t.title,  "Purple Rain");
+        }, s);
+        test("skips empty slots", () => {
+          assertEqual(buildRecentTracks({ prev_artist_1: "Solo", prev_title_1: "Track" }).length, 1);
+        }, s);
+        test("fills missing artist with dash", () => {
+          const t = buildRecentTracks({ prev_title_1: "No Artist" })[0];
+          assertEqual(t.artist, "—");
+          assertEqual(t.title,  "No Artist");
+        }, s);
+      });
+
+      suite("getUID()", s => {
+        function mockStore() {
+          const data = {};
+          return { getItem: k => data[k] ?? null, setItem: (k, v) => { data[k] = v; }, data };
+        }
+        test("generates and stores a UUID", () => {
+          const store = mockStore();
+          const uid = getUID(store);
+          assert(typeof uid === "string" && uid.length > 0, "uid should be non-empty string");
+          assertEqual(store.data["rc_uid"], uid);
+        }, s);
+        test("returns same UID on second call", () => {
+          const store = mockStore();
+          assertEqual(getUID(store), getUID(store));
+        }, s);
+        test("generates different UIDs for different stores", () => {
+          assert(getUID(mockStore()) !== getUID(mockStore()), "fresh stores should produce different UIDs");
+        }, s);
+      });
+
+      // ── Summary ────────────────────────────────────────────────────────────
+      const total = passed + failed;
+      const summary = document.getElementById("summary");
+      summary.textContent = `${passed}/${total} tests passed${failed > 0 ? ` — ${failed} failed` : " ✓"}`;
+      summary.style.color = failed > 0 ? "#c0392b" : "#1a7a1a";
+    });
+  </script>
+</body>
+</html>

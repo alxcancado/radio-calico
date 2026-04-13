@@ -4,3 +4,4 @@ api/ratings.db
 api/__pycache__/
 api/.venv/
 api/.python-version
+tests/__pycache__/

@@ -319,6 +319,35 @@ Located in `.github/workflows/`:
 | `ai-approved` | Maintainer (manual) | Approved for automated implementation |
 | `ai-rejected` | Maintainer (manual) | Issue closed without action |
 
+### 9.6 Implementation Details
+
+Shell logic lives in `.github/scripts/` to keep the YAML clean and parseable:
+
+| Script | Called by | Purpose |
+|--------|-----------|---------|
+| `review.sh` | `issue-review.yml` | Builds prompt, calls OpenRouter, posts comment, adds labels |
+| `apply.sh`  | `issue-apply.yml`  | Bundles source, calls OpenRouter, writes files, commits, opens PR |
+
+**Why scripts instead of inline YAML shell?**
+Multiline strings with special characters (quotes, colons, backticks) inside YAML `run:` blocks cause YAML parse errors. Moving the logic to `.sh` files avoids this entirely and makes the scripts independently testable.
+
+### 9.7 How to Use
+
+1. Open an issue at `github.com/alxcancado/radio-calico/issues/new`
+2. Describe the change you want — be specific about what should change and why
+3. Wait ~30 seconds — the AI will post a review comment and add the `ai-pending-review` label
+4. Read the review. If you agree with the recommendation:
+   - Add label `ai-approved` → triggers `issue-apply.yml`, which creates a branch, writes the code, and opens a PR
+   - Add label `ai-rejected` → closes the loop, no code changes made
+5. Review and merge (or edit) the PR as normal
+
+### 9.8 Troubleshooting
+
+- **Workflow didn't fire** — check repo → Settings → Actions → General → Workflow permissions is set to "Read and write permissions"
+- **LLM response unavailable** — check the `OPENROUTER_API_KEY` secret is set correctly under Settings → Secrets → Actions
+- **YAML parse error on push** — run `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/issue-review.yml'))"` locally to validate before pushing
+- **PR branch already exists** — the LLM reused a branch name; delete the old branch and re-add the `ai-approved` label
+
 
 | File                      | Purpose                        |
 |---------------------------|--------------------------------|

@@ -1,0 +1,32 @@
+services:
+
+  dev:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app                  # live reload — edits reflect immediately
+      - /app/api/.venv          # keep venv inside container, not overwritten by mount
+    ports:
+      - "8080:8080"             # frontend
+      - "5000:5000"             # API
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    profiles: [dev]
+
+  prod:
+    build:
+      context: .
+      target: prod
+    ports:
+      - "80:80"
+    volumes:
+      - ratings_data:/app/api   # persist SQLite DB across restarts
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+    profiles: [prod]
+
+volumes:
+  ratings_data:

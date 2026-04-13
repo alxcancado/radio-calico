@@ -1,0 +1,8 @@
+.git
+.venv
+api/.venv
+api/ratings.db
+api/__pycache__
+tests/__pycache__
+*.zip
+.kiro

@@ -110,7 +110,11 @@ if (typeof document !== "undefined") {
   }
 
   // ── RATINGS ──
-  const API = "http://localhost:5000";
+  // In prod (Docker/nginx) the API is proxied at /ratings — no absolute URL needed.
+  // In dev (file:// or explicit port) fall back to localhost:5000.
+  const API = (window.location.protocol === "file:" || window.location.port === "8080")
+    ? "http://localhost:5000"
+    : "";
   const UID = getUID(localStorage);
   let currentKey = null;
 

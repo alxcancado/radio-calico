@@ -24,7 +24,7 @@ EXPOSE 5000 8080
 # Start both servers via a small shell script
 CMD ["sh", "-c", "\
   python3 -m http.server 8080 --directory /app & \
-  uv run --directory /app/api python app.py \
+  uv run --directory /app/api python app.py --host 0.0.0.0 \
 "]
 
 # ── Prod stage ────────────────────────────────────────────────────────────────
